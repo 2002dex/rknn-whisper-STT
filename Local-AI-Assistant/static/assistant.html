@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Jarvis — AI Assistant</title>
+<meta name="description" content="Real-time Hindi voice assistant with wake word and manual trigger."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+Devanagari:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+/* ── Reset & Tokens ─────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:        #080b11;
+  --surface:   #0f1319;
+  --card:      #151b26;
+  --card-hi:   #1a2233;
+  --border:    rgba(255,255,255,0.07);
+  --glow-c:    #4fc3f7;
+  --glow-g:    #4dd0e1;
+  --glow-r:    #ef5350;
+  --accent:    #4fc3f7;
+  --accent2:   #26c6da;
+  --green:     #66bb6a;
+  --amber:     #ffa726;
+  --purple:    #ab47bc;
+  --text:      #e0e8f8;
+  --text2:     #7b8eaa;
+  --text3:     #3d4f68;
+  --r-sm:6px; --r-md:14px; --r-lg:22px; --r-xl:32px;
+  --t:.22s cubic-bezier(.4,0,.2,1);
+  --mono:'JetBrains Mono',monospace;
+  --deva:'Noto Sans Devanagari','Inter',sans-serif;
+}
+html{scroll-behavior:smooth}
+body{
+  font-family:'Inter',system-ui,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+
+/* ── Animated background orbs ───────────────────────────── */
+.bg-orbs{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.orb{
+  position:absolute;border-radius:50%;filter:blur(80px);opacity:0.06;
+  animation:drift 18s ease-in-out infinite alternate;
+}
+.orb-1{width:600px;height:600px;background:var(--glow-c);top:-150px;left:-150px;animation-duration:20s}
+.orb-2{width:400px;height:400px;background:var(--purple);bottom:-100px;right:-100px;animation-duration:15s;animation-delay:-8s}
+.orb-3{width:300px;height:300px;background:var(--glow-g);top:40%;left:40%;animation-duration:12s;animation-delay:-3s}
+@keyframes drift{
+  0%{transform:translate(0,0) scale(1)}
+  100%{transform:translate(40px,30px) scale(1.08)}
+}
+
+/* ── Layout ─────────────────────────────────────────────── */
+.app{position:relative;z-index:1;display:flex;flex-direction:column;min-height:100vh}
+
+header{
+  padding:0 24px;height:58px;
+  display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--border);
+  background:rgba(8,11,17,0.8);
+  backdrop-filter:blur(20px);
+  position:sticky;top:0;z-index:100;
+}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:.95rem;letter-spacing:-.02em}
+.logo-ring{
+  width:28px;height:28px;border-radius:50%;
+  border:2px solid var(--accent);
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 12px rgba(79,195,247,.4);
+  animation:ring-pulse 3s ease-in-out infinite;
+}
+.logo-ring svg{width:14px;height:14px;fill:var(--accent)}
+@keyframes ring-pulse{
+  0%,100%{box-shadow:0 0 8px rgba(79,195,247,.3)}
+  50%{box-shadow:0 0 22px rgba(79,195,247,.7),0 0 40px rgba(79,195,247,.2)}
+}
+.ws-badge{
+  display:flex;align-items:center;gap:6px;
+  font-size:.72rem;font-weight:600;padding:3px 10px;border-radius:100px;
+  border:1px solid var(--border);color:var(--text2);transition:var(--t);
+}
+.ws-badge .dot{width:6px;height:6px;border-radius:50%;background:var(--text3);transition:var(--t)}
+.ws-badge.ok{color:var(--green);border-color:rgba(102,187,106,.3)}
+.ws-badge.ok .dot{background:var(--green);box-shadow:0 0 6px var(--green)}
+.ws-badge.err{color:var(--glow-r);border-color:rgba(239,83,80,.3)}
+.ws-badge.err .dot{background:var(--glow-r)}
+
+main{flex:1;max-width:780px;width:100%;margin:0 auto;padding:24px 16px 60px;display:flex;flex-direction:column;gap:20px}
+
+/* ── Card ────────────────────────────────────────────────── */
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--r-lg);
+  overflow:hidden;
+  box-shadow:0 6px 32px rgba(0,0,0,.5);
+  transition:box-shadow var(--t);
+}
+.card:hover{box-shadow:0 6px 32px rgba(0,0,0,.5),0 0 30px rgba(79,195,247,.06)}
+.card-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:13px 18px;border-bottom:1px solid var(--border);
+  background:rgba(255,255,255,.02);
+}
+.card-head-title{
+  display:flex;align-items:center;gap:8px;
+  font-size:.72rem;font-weight:700;text-transform:uppercase;
+  letter-spacing:.08em;color:var(--text2);
+}
+.card-head-title .ico{font-size:.95rem}
+.card-body{padding:16px 18px}
+
+/* ── Big Action Button ───────────────────────────────────── */
+.action-wrap{display:flex;flex-direction:column;align-items:center;gap:18px;padding:28px 18px}
+
+.mic-btn{
+  width:96px;height:96px;border-radius:50%;border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  box-shadow:0 0 0 0 rgba(79,195,247,.5);
+  transition:transform var(--t),box-shadow var(--t);
+  position:relative;
+}
+.mic-btn:hover:not(:disabled){transform:scale(1.08);box-shadow:0 0 28px rgba(79,195,247,.5)}
+.mic-btn:active:not(:disabled){transform:scale(.97)}
+.mic-btn:disabled{opacity:.4;cursor:not-allowed}
+.mic-btn svg{width:40px;height:40px;fill:#0d1520}
+.mic-btn.recording{
+  background:linear-gradient(135deg,var(--glow-r),#ef9a9a);
+  animation:mic-pulse 1.2s ease-in-out infinite;
+}
+@keyframes mic-pulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(239,83,80,.5)}
+  50%{box-shadow:0 0 0 18px rgba(239,83,80,0)}
+}
+.mic-label{font-size:.9rem;font-weight:600;color:var(--text2)}
+
+/* wake word toggle row */
+.ww-row{
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  flex-wrap:wrap;
+}
+.toggle-btn{
+  background:rgba(255,255,255,.05);border:1px solid var(--border);
+  border-radius:var(--r-sm);padding:6px 14px;font-size:.78rem;font-weight:600;
+  color:var(--text2);cursor:pointer;transition:var(--t);
+}
+.toggle-btn:hover{border-color:var(--accent);color:var(--accent)}
+.toggle-btn.active{background:rgba(79,195,247,.15);border-color:var(--accent);color:var(--accent)}
+.ww-label{font-size:.78rem;color:var(--text3)}
+
+/* ── Status bar ──────────────────────────────────────────── */
+#status-bar{
+  font-family:var(--deva);font-size:.9rem;color:var(--accent);
+  min-height:1.4rem;text-align:center;
+  transition:color var(--t);
+}
+#status-bar.error{color:var(--glow-r)}
+
+/* ── Transcript live area ────────────────────────────────── */
+#transcript-area{
+  font-family:var(--deva);
+  font-size:1.05rem;line-height:1.75;
+  color:var(--text);
+  min-height:60px;
+  white-space:pre-wrap;word-break:break-word;
+  position:relative;
+}
+#transcript-area:empty::after{
+  content:'Transcript will appear here…';
+  color:var(--text3);font-style:italic;font-size:.9rem;
+}
+/* blinking cursor during decode */
+#transcript-area.live::after{
+  content:'▍';color:var(--accent);
+  animation:cur-blink .8s step-start infinite;
+  display:inline-block;margin-left:2px;
+}
+@keyframes cur-blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* ── Response area ───────────────────────────────────────── */
+#response-area{
+  font-family:var(--deva);
+  font-size:1rem;line-height:1.8;
+  color:var(--text);
+  min-height:52px;
+  white-space:pre-wrap;word-break:break-word;
+}
+#response-area:empty::after{
+  content:'Assistant\'s response will appear here…';
+  color:var(--text3);font-style:italic;font-size:.9rem;
+}
+.store-chip{
+  display:inline-block;
+  background:rgba(171,71,188,.2);border:1px solid rgba(171,71,188,.4);
+  color:#ce93d8;border-radius:var(--r-sm);
+  padding:1px 8px;font-size:.78rem;font-weight:600;margin-left:6px;
+}
+
+/* ── Memory note banner ──────────────────────────────────── */
+#memory-note{
+  display:none;align-items:center;gap:12px;
+  background:rgba(171,71,188,.1);border:1px solid rgba(171,71,188,.3);
+  border-radius:var(--r-md);padding:12px 16px;
+  animation:slide-in .35s ease;
+}
+#memory-note.show{display:flex}
+.note-icon{font-size:1.3rem}
+.note-label{font-size:.68rem;font-weight:700;color:#ce93d8;text-transform:uppercase;letter-spacing:.07em}
+.note-text{font-family:var(--deva);font-size:.9rem;color:var(--text);margin-top:2px}
+
+@keyframes slide-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ── History ─────────────────────────────────────────────── */
+#history{display:flex;flex-direction:column;gap:8px;max-height:320px;overflow-y:auto;
+  scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+#history:empty::after{content:'Previous sessions can be found here…';color:var(--text3);font-style:italic;font-size:.85rem;padding:4px 0;display:block}
+
+.hist-item{
+  background:var(--card-hi);border:1px solid var(--border);
+  border-radius:var(--r-sm);padding:10px 14px;
+  animation:slide-in .3s ease;
+}
+.hist-ts{font-family:var(--mono);font-size:.65rem;color:var(--text3);margin-bottom:4px}
+.hist-transcript{font-family:var(--deva);font-size:.83rem;color:var(--text2);margin-bottom:4px;white-space:pre-wrap;word-break:break-word}
+.hist-response{font-family:var(--deva);font-size:.85rem;color:var(--text);white-space:pre-wrap;word-break:break-word}
+
+/* ── Error toast ─────────────────────────────────────────── */
+#toast{
+  display:none;position:fixed;bottom:22px;right:22px;
+  background:rgba(239,83,80,.12);border:1px solid rgba(239,83,80,.4);
+  color:var(--glow-r);border-radius:var(--r-md);padding:11px 16px;
+  font-size:.82rem;max-width:340px;z-index:999;animation:slide-in .3s ease;
+}
+
+/* ── Scroll ─────────────────────────────────────────────── */
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+</style>
+</head>
+<body>
+<div class="bg-orbs">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+</div>
+
+<div class="app">
+<header>
+  <div class="logo">
+    <div class="logo-ring">
+      <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3zm7 9a1 1 0 0 1 1 1 8 8 0 0 1-7 7.94V22h-2v-2.06A8 8 0 0 1 4 12a1 1 0 0 1 2 0 6 6 0 0 0 12 0 1 1 0 0 1 1-1z"/></svg>
+    </div>
+    Jarvis — AI Voice Assistant
+  </div>
+  <div class="ws-badge" id="ws-badge">
+    <div class="dot"></div>
+    <span id="ws-label">Connecting…</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── Trigger card ──────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-head-title"><span class="ico">🎙</span> Recording control</div>
+    </div>
+    <div class="card-body">
+      <div class="action-wrap">
+        <button class="mic-btn" id="mic-btn" onclick="triggerListen()" title="Press to speak">
+          <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3zm7 9a1 1 0 0 1 1 1 8 8 0 0 1-7 7.94V22h-2v-2.06A8 8 0 0 1 4 12a1 1 0 0 1 2 0 6 6 0 0 0 12 0 1 1 0 0 1 1-1z"/></svg>
+        </button>
+        <div class="mic-label" id="mic-label">press and speak</div>
+
+        <div id="status-bar"></div>
+
+        <div class="ww-row">
+          <span class="ww-label">Wake word:</span>
+          <button class="toggle-btn" id="ww-btn" onclick="toggleWakeWord()">
+            "hey jarvis" turn on
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Live transcript ───────────────────────────────────── -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-head-title"><span class="ico">📝</span> Live Transcript</div>
+      <span id="lang-chip" style="font-size:.68rem;color:var(--text3)">Hindi</span>
+    </div>
+    <div class="card-body">
+      <div id="transcript-area"></div>
+    </div>
+  </div>
+
+  <!-- ── Qwen response ─────────────────────────────────────── -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-head-title"><span class="ico">🤖</span> Assistant's answer</div>
+    </div>
+    <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
+      <div id="response-area"></div>
+      <div id="memory-note">
+        <span class="note-icon">📌</span>
+        <div>
+          <div class="note-label">remembered</div>
+          <div class="note-text" id="note-text"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Session history ───────────────────────────────────── -->
+  <div class="card">
+    <div class="card-head">
+      <div class="card-head-title"><span class="ico">🕘</span> last session</div>
+      <button onclick="history_list.innerHTML=''" style="font-size:.72rem;padding:3px 10px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text3);cursor:pointer">clear up</button>
+    </div>
+    <div class="card-body">
+      <div id="history"></div>
+    </div>
+  </div>
+
+</main>
+</div><!-- .app -->
+
+<div id="toast"></div>
+
+<script>
+// ── WebSocket ──────────────────────────────────────────────
+const WS = `ws://${location.host}/ws`;
+let ws, reconnTimer;
+let wakeWordOn  = false;
+let isRecording = false;
+
+// ── current session buffers ────────────────────────────────
+let curTranscript = "";
+let curResponse   = "";
+let sessionStart  = null;
+
+function wsStatus(cls, text){
+  const b = document.getElementById('ws-badge');
+  b.className = 'ws-badge ' + cls;
+  document.getElementById('ws-label').textContent = text;
+}
+
+function connect(){
+  wsStatus('','connecting…');
+  ws = new WebSocket(WS);
+  ws.onopen  = () => { wsStatus('ok','connected'); if(reconnTimer){clearTimeout(reconnTimer);reconnTimer=null;} };
+  ws.onclose = () => { wsStatus('err','disconnected'); reconnTimer = setTimeout(connect,3000); };
+  ws.onerror = () => wsStatus('err','error');
+  ws.onmessage = ev => {
+    try{ handleEvent(JSON.parse(ev.data)); }catch{}
+  };
+}
+
+// ── Event handler ──────────────────────────────────────────
+function handleEvent(ev){
+  if(ev.type === 'wake_word'){
+    setStatus(`🟢 "hey jarvis" heard (${ev.score.toFixed(2)})`);
+    startRecordingUI();
+  }
+  else if(ev.type === 'status'){
+    setStatus(ev.text);
+    if(ev.text && ev.text.includes('record')){
+      startRecordingUI();
+    }
+  }
+  else if(ev.type === 'token'){
+    // live partial transcript
+    curTranscript = ev.text;
+    const ta = document.getElementById('transcript-area');
+    ta.textContent = ev.text;
+    ta.classList.add('live');
+  }
+  else if(ev.type === 'final'){
+    endRecordingUI();
+    // freeze transcript
+    const ta = document.getElementById('transcript-area');
+    ta.textContent  = ev.transcript || '';
+    ta.classList.remove('live');
+    curTranscript   = ev.transcript || '';
+
+    // show response
+    const ra = document.getElementById('response-area');
+    if(ev.qwen_response){
+      const html = escHtml(ev.qwen_response).replace(
+        /STORE:\s*(.+)/g,
+        `STORE:<span class="store-chip">$1</span>`
+      );
+      ra.innerHTML = html;
+      curResponse = ev.qwen_response;
+    }
+
+    // memory note
+    if(ev.memory_note){
+      document.getElementById('note-text').textContent = ev.memory_note;
+      document.getElementById('memory-note').classList.add('show');
+    } else {
+      document.getElementById('memory-note').classList.remove('show');
+    }
+
+    // push to history
+    pushHistory(curTranscript, curResponse, ev.memory_note);
+    setStatus('Is ready.');
+  }
+  else if(ev.type === 'error'){
+    showToast(ev.message || 'Unknown error');
+    endRecordingUI();
+    setStatus('Error occurred.', true);
+  }
+}
+
+// ── Recording UI state ─────────────────────────────────────
+function startRecordingUI(){
+  isRecording = true;
+  sessionStart = new Date();
+  const btn = document.getElementById('mic-btn');
+  btn.classList.add('recording');
+  btn.disabled = true;
+  document.getElementById('mic-label').textContent = 'recording is in progress…';
+  // clear previous session
+  document.getElementById('transcript-area').textContent = '';
+  document.getElementById('transcript-area').classList.remove('live');
+  document.getElementById('response-area').innerHTML = '';
+  document.getElementById('memory-note').classList.remove('show');
+  curTranscript = ''; curResponse = '';
+}
+
+function endRecordingUI(){
+  isRecording = false;
+  const btn = document.getElementById('mic-btn');
+  btn.classList.remove('recording');
+  btn.disabled = false;
+  document.getElementById('mic-label').textContent = 'Press and speak';
+}
+
+// ── Manual trigger ─────────────────────────────────────────
+async function triggerListen(){
+  if(isRecording) return;
+  startRecordingUI();
+  setStatus('recording is in progress…');
+  try{
+    const r = await fetch('/listen',{method:'POST'});
+    if(!r.ok){ const e=await r.json().catch(()=>({detail:'Server error'})); showToast(e.detail); endRecordingUI(); }
+  }catch(e){
+    showToast('Failed to connect to server: '+e.message);
+    endRecordingUI();
+  }
+}
+
+// ── Wake word toggle ───────────────────────────────────────
+async function toggleWakeWord(){
+  const btn = document.getElementById('ww-btn');
+  if(!wakeWordOn){
+    try{
+      await fetch('/wake/start',{method:'POST'});
+      wakeWordOn = true;
+      btn.textContent = '"hey jarvis" turn off';
+      btn.classList.add('active');
+      setStatus('"hey jarvis" is active…');
+    }catch(e){ showToast('Failed to enable wake word: '+e.message); }
+  } else {
+    try{
+      await fetch('/wake/stop',{method:'POST'});
+      wakeWordOn = false;
+      btn.textContent = '"hey jarvis" turn on';
+      btn.classList.remove('active');
+      setStatus('');
+    }catch(e){ showToast('Failed to disable wake word: '+e.message); }
+  }
+}
+
+// ── Status bar ─────────────────────────────────────────────
+function setStatus(text, isErr=false){
+  const el = document.getElementById('status-bar');
+  el.textContent = text;
+  el.className   = isErr ? 'error' : '';
+}
+
+// ── History ────────────────────────────────────────────────
+const history_list = document.getElementById('history');
+function pushHistory(transcript, response, note){
+  if(!transcript && !response) return;
+  const now = new Date().toLocaleTimeString('hi-IN');
+  const item = document.createElement('div');
+  item.className = 'hist-item';
+  item.innerHTML = `
+    <div class="hist-ts">${now}</div>
+    ${transcript ? `<div class="hist-transcript">🎙 ${escHtml(transcript)}</div>` : ''}
+    ${response   ? `<div class="hist-response">🤖 ${escHtml(response)}</div>` : ''}
+    ${note       ? `<div style="font-size:.75rem;color:#ce93d8;margin-top:4px">📌 ${escHtml(note)}</div>` : ''}
+  `;
+  history_list.prepend(item);
+}
+
+// ── Toast ──────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg){
+  const el = document.getElementById('toast');
+  el.textContent = '⚠ '+msg;
+  el.style.display = 'block';
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=>el.style.display='none', 6000);
+}
+
+// ── Helper ─────────────────────────────────────────────────
+function escHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Init ───────────────────────────────────────────────────
+connect();
+</script>
+</body>
+</html>
