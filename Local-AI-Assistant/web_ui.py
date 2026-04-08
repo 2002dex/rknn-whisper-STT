@@ -415,7 +415,7 @@ async def _startup():
     await hub.start()
     # Pre-load STT model in a thread so the first request is instant
     threading.Thread(target=core.get_stt().load, daemon=True, name="stt-preload").start()
-    threading.Thread(target=core.get_qwen,       daemon=True, name="qwen-preload").start()
+    threading.Thread(target=core.get_llama,       daemon=True, name="llama-preload").start()
 
 
 # ── HTML SPA ──────────────────────────────────────────────────

@@ -197,6 +197,17 @@ main{flex:1;max-width:780px;width:100%;margin:0 auto;padding:24px 16px 60px;disp
   content:'Assistant\'s response will appear here…';
   color:var(--text3);font-style:italic;font-size:.9rem;
 }
+#translation-area{
+  font-family:var(--deva);
+  font-size:.95rem;line-height:1.7;
+  color:var(--text2);
+  min-height:48px;
+  white-space:pre-wrap;word-break:break-word;
+}
+#translation-area:empty::after{
+  content:'English translation will appear here…';
+  color:var(--text3);font-style:italic;font-size:.9rem;
+}
 .store-chip{
   display:inline-block;
   background:rgba(171,71,188,.2);border:1px solid rgba(171,71,188,.4);
@@ -302,13 +313,21 @@ main{flex:1;max-width:780px;width:100%;margin:0 auto;padding:24px 16px 60px;disp
     </div>
   </div>
 
-  <!-- ── Qwen response ─────────────────────────────────────── -->
+  <!-- ── Assistant response ──────────────────────────────── -->
   <div class="card">
     <div class="card-head">
       <div class="card-head-title"><span class="ico">🤖</span> Assistant's answer</div>
     </div>
-    <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
+    <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
+      <!-- Translation block -->
+      <div id="translation-block" style="display:none">
+        <div style="font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--accent2);margin-bottom:6px">🌐 Translation (English)</div>
+        <div id="translation-area"></div>
+        <div style="height:1px;background:var(--border);margin-top:10px"></div>
+      </div>
+      <!-- LLM reply block -->
       <div id="response-area"></div>
+      <!-- Memory note -->
       <div id="memory-note">
         <span class="note-icon">📌</span>
         <div>
@@ -366,58 +385,79 @@ function connect(){
 
 // ── Event handler ──────────────────────────────────────────
 function handleEvent(ev){
-  if(ev.type === 'wake_word'){
-    setStatus(`🟢 "hey jarvis" heard (${ev.score.toFixed(2)})`);
-    startRecordingUI();
-  }
-  else if(ev.type === 'status'){
-    setStatus(ev.text);
-    if(ev.text && ev.text.includes('record')){
+  try{
+    if(ev.type === 'wake_word'){
+      setStatus(`🟢 "hey jarvis" heard (${ev.score.toFixed(2)})`);
       startRecordingUI();
     }
-  }
-  else if(ev.type === 'token'){
-    // live partial transcript
-    curTranscript = ev.text;
-    const ta = document.getElementById('transcript-area');
-    ta.textContent = ev.text;
-    ta.classList.add('live');
-  }
-  else if(ev.type === 'final'){
-    endRecordingUI();
-    // freeze transcript
-    const ta = document.getElementById('transcript-area');
-    ta.textContent  = ev.transcript || '';
-    ta.classList.remove('live');
-    curTranscript   = ev.transcript || '';
-
-    // show response
-    const ra = document.getElementById('response-area');
-    if(ev.qwen_response){
-      const html = escHtml(ev.qwen_response).replace(
-        /STORE:\s*(.+)/g,
-        `STORE:<span class="store-chip">$1</span>`
-      );
-      ra.innerHTML = html;
-      curResponse = ev.qwen_response;
+    else if(ev.type === 'status'){
+      setStatus(ev.text);
+      if(ev.text && ev.text.includes('record')){
+        startRecordingUI();
+      }
     }
-
-    // memory note
-    if(ev.memory_note){
-      document.getElementById('note-text').textContent = ev.memory_note;
-      document.getElementById('memory-note').classList.add('show');
-    } else {
-      document.getElementById('memory-note').classList.remove('show');
+    else if(ev.type === 'token'){
+      // live partial transcript
+      curTranscript = ev.text;
+      const ta = document.getElementById('transcript-area');
+      if(ta){ ta.textContent = ev.text; ta.classList.add('live'); }
     }
+    else if(ev.type === 'final'){
+      endRecordingUI();
 
-    // push to history
-    pushHistory(curTranscript, curResponse, ev.memory_note);
-    setStatus('Is ready.');
-  }
-  else if(ev.type === 'error'){
-    showToast(ev.message || 'Unknown error');
-    endRecordingUI();
-    setStatus('Error occurred.', true);
+      // freeze transcript
+      const ta = document.getElementById('transcript-area');
+      if(ta){ ta.textContent = ev.transcript || ''; ta.classList.remove('live'); }
+      curTranscript = ev.transcript || '';
+
+      // show translation
+      const translationText = (ev.translation || '').trim();
+      const trBlock = document.getElementById('translation-block');
+      const trArea  = document.getElementById('translation-area');
+      if(trArea)  trArea.textContent = translationText;
+      if(trBlock) trBlock.style.display = translationText ? 'block' : 'none';
+
+      // show LLM reply (qwen_response / llama_response — strip any
+      // prefixed "Translation: …" line that the backend may attach)
+      let responseText = (ev.qwen_response || ev.llama_response || '').trim();
+      // Remove duplicate translation line if backend prepended it
+      responseText = responseText.replace(/^Translation:.*?\n/i, '').trim();
+      const ra = document.getElementById('response-area');
+      if(ra){
+        if(responseText){
+          const html = escHtml(responseText).replace(
+            /STORE:\s*(.+)/g,
+            `STORE:<span class="store-chip">$1</span>`
+          );
+          ra.innerHTML = html;
+          curResponse = responseText;
+        } else {
+          ra.innerHTML = '';
+          curResponse = '';
+        }
+      }
+
+      // memory note
+      const noteText = document.getElementById('note-text');
+      const noteEl   = document.getElementById('memory-note');
+      if(ev.memory_note){
+        if(noteText) noteText.textContent = ev.memory_note;
+        if(noteEl)   noteEl.classList.add('show');
+      } else {
+        if(noteEl) noteEl.classList.remove('show');
+      }
+
+      // push to history
+      pushHistory(curTranscript, translationText, curResponse, ev.memory_note);
+      setStatus('Is ready.');
+    }
+    else if(ev.type === 'error'){
+      showToast(ev.message || 'Unknown error');
+      endRecordingUI();
+      setStatus('Error occurred.', true);
+    }
+  } catch(err){
+    console.error('handleEvent error:', err);
   }
 }
 
@@ -432,6 +472,10 @@ function startRecordingUI(){
   // clear previous session
   document.getElementById('transcript-area').textContent = '';
   document.getElementById('transcript-area').classList.remove('live');
+  const trArea  = document.getElementById('translation-area');
+  const trBlock = document.getElementById('translation-block');
+  if(trArea)  trArea.textContent = '';
+  if(trBlock) trBlock.style.display = 'none';
   document.getElementById('response-area').innerHTML = '';
   document.getElementById('memory-note').classList.remove('show');
   curTranscript = ''; curResponse = '';
@@ -490,16 +534,17 @@ function setStatus(text, isErr=false){
 
 // ── History ────────────────────────────────────────────────
 const history_list = document.getElementById('history');
-function pushHistory(transcript, response, note){
+function pushHistory(transcript, translation, response, note){
   if(!transcript && !response) return;
   const now = new Date().toLocaleTimeString('hi-IN');
   const item = document.createElement('div');
   item.className = 'hist-item';
   item.innerHTML = `
     <div class="hist-ts">${now}</div>
-    ${transcript ? `<div class="hist-transcript">🎙 ${escHtml(transcript)}</div>` : ''}
-    ${response   ? `<div class="hist-response">🤖 ${escHtml(response)}</div>` : ''}
-    ${note       ? `<div style="font-size:.75rem;color:#ce93d8;margin-top:4px">📌 ${escHtml(note)}</div>` : ''}
+    ${transcript  ? `<div class="hist-transcript">🎙 ${escHtml(transcript)}</div>` : ''}
+    ${translation ? `<div style="font-size:.8rem;color:var(--accent2);margin:2px 0">🌐 ${escHtml(translation)}</div>` : ''}
+    ${response    ? `<div class="hist-response">🤖 ${escHtml(response)}</div>` : ''}
+    ${note        ? `<div style="font-size:.75rem;color:#ce93d8;margin-top:4px">📌 ${escHtml(note)}</div>` : ''}
   `;
   history_list.prepend(item);
 }

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # assistant_core_hindi.py
 """
-Hindi-forced STT + Qwen-2.5 assistant core.
+Hindi-forced STT + Llama-3.2 assistant core.
 Based on assistant_core_optimized.py — hardcoded to Hindi forced tokens.
 
 Key additions vs reference:
   - FORCED_IDS locked to Hindi (<|hi|> = 50275)
   - Token-by-token streaming callback: set on_token(text) for real-time UI updates
-  - Qwen-2.5 integration (rkllm primary / HTTP fallback) with JSON response parsing
-  - process_audio(wav_path) → dict {transcript, qwen_response, memory_note}
+  - Llama-3.2 integration (rkllm primary / HTTP fallback) with JSON response parsing
+  - process_audio(wav_path) → dict {transcript, llama_response, memory_note}
   - Thread-safe singleton engine; 30-min idle unload watchdog
 """
 
@@ -60,13 +60,13 @@ MODEL_IDLE_TIMEOUT = 30 * 60          # seconds
 RKNN_CORE_MASK     = RKNNLite.NPU_CORE_ALL
 SAMPLE_RATE        = 16000
 
-# ── Qwen-2.5 ─────────────────────────────────────────────────
-QWEN_MODEL_PATH   = "/home/smadmin/rkllama/models/Llama3.2"
-QWEN_BACKEND      = "rkllm"            # "rkllm" | "http"
-QWEN_API_URL      = "http://localhost:8080/v1/chat/completions"
-QWEN_API_KEY      = "none"
-QWEN_MAX_TOKENS   = 400
-QWEN_TEMPERATURE  = 0.4
+# ── Llama-3.2 ─────────────────────────────────────────────────
+LLAMA_MODEL_PATH   = "/home/smadmin/rkllama/models/Llama3.2"
+LLAMA_BACKEND      = "rkllm"            # "rkllm" | "http"
+LLAMA_API_URL      = "http://localhost:8080/v1/chat/completions"
+LLAMA_API_KEY      = "none"
+LLAMA_MAX_TOKENS   = 400
+LLAMA_TEMPERATURE  = 0.4
 
 # ── Regex helpers ─────────────────────────────────────────────
 RE_PAST        = re.compile(r"past_key_values\.(\d+)\.(.*)",          re.IGNORECASE)
@@ -372,52 +372,48 @@ threading.Thread(target=_watchdog, daemon=True, name="stt-watchdog").start()
 
 
 # ══════════════════════════════════════════════════════════════
-#  QWEN-2.5  SINGLETON
+#  LLAMA-3.2  SINGLETON
 # ══════════════════════════════════════════════════════════════
 
 _SYSTEM_PROMPT = (
-    "You are a personal assistant with a memory database. "
-    "If the user tells you where something is, you MUST provide a line exactly like this: "
-    "STORE: <object> | <location>"
-    "Example: STORE: keys | kitchen drawer"
+    "You are a memory assistant. Reply using ONLY one of these three formats:\n"
+    "STORE: <object> | <location>\n"
+    "FETCH: <object>\n"
+    "REPLY: <answer>\n\n"
+    "Examples:\n"
+    "'I kept my wallet in the drawer.' -> STORE: wallet | drawer\n"
+    "'Where are my keys?' -> FETCH: keys\n"
+    "'Hello!' -> REPLY: Hello! How can I help you?"
 )
 
-_USER_TEMPLATE = """\
-TRANSCRIPT: {transcript}
+_USER_TEMPLATE = "{transcript}"
 
-RULES:
-1. Identify if the user is storing info or asking for it.
-2. If storing, extract 'object' and 'location'. 
-3. Provide the 'STORE: <object> | <location>' line at the end.
-4. If asking, provide 'REPLY: <answer>'.
-"""
+_llama_fn   = None
+_llama_lock = threading.Lock()
 
-_qwen_fn   = None
-_qwen_lock = threading.Lock()
-
-def _load_qwen_rkllm():
+def _load_llama_rkllm():
     try:
         from rkllm.api import RKLLM  # type: ignore
         m = RKLLM()
-        if m.load_rkllm(QWEN_MODEL_PATH) != 0:
+        if m.load_rkllm(LLAMA_MODEL_PATH) != 0:
             raise RuntimeError("rkllm load failed")
         m.init_runtime()
-        logger.info("✅ Qwen-2.5 loaded via rkllm (NPU).")
+        logger.info("✅ Llama-3.2 loaded via rkllm (NPU).")
         def _run(prompt: str) -> str:
             r = m.run(prompt)
             return r if isinstance(r, str) else str(r)
         def _unload():
             try:
                 m.unload()
-                logger.info("✅ Qwen-2.5 unloaded via rkllm.")
+                logger.info("✅ Llama-3.2 unloaded via rkllm.")
             except Exception as e:
                 logger.warning("Failed to unload rkllm: %s", e)
         return {'run': _run, 'unload': _unload}
     except Exception as e:
-        logger.warning("rkllm Qwen load failed: %s — falling back to HTTP.", e)
+        logger.warning("rkllm Llama-3.2 load failed: %s — falling back to HTTP.", e)
         return None
 
-def _load_qwen_http():
+def _load_llama_http():
     import urllib.request
     def _run(prompt: str) -> str:
         payload = json.dumps({
@@ -427,22 +423,22 @@ def _load_qwen_http():
                 {"role": "user",   "content": prompt},
             ],
             # OpenAI-style
-            "max_tokens": QWEN_MAX_TOKENS,
-            "temperature": QWEN_TEMPERATURE,
+            "max_tokens": LLAMA_MAX_TOKENS,
+            "temperature": LLAMA_TEMPERATURE,
             "stream": False,
             # Ollama/Open-WebUI-style
             "options": {
-                "temperature": QWEN_TEMPERATURE,
-                "max_new_tokens": QWEN_MAX_TOKENS,
+                "temperature": LLAMA_TEMPERATURE,
+                "max_new_tokens": LLAMA_MAX_TOKENS,
                 "stop": None,
             },
         }).encode("utf-8")
 
         req = urllib.request.Request(
-            QWEN_API_URL, data=payload,
+            LLAMA_API_URL, data=payload,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {QWEN_API_KEY}",
+                "Authorization": f"Bearer {LLAMA_API_KEY}",
                 "Connection": "close",
             },
             method="POST",
@@ -464,11 +460,11 @@ def _load_qwen_http():
             if "result" in data and isinstance(data["result"], str):
                 return data["result"]
 
-        raise RuntimeError(f"Unexpected response from Qwen HTTP API: {data}")
+        raise RuntimeError(f"Unexpected response from Llama HTTP API: {data}")
 
     def _unload():
         try:
-            unload_url = QWEN_API_URL.rstrip('/')
+            unload_url = LLAMA_API_URL.rstrip('/')
             if unload_url.endswith('/v1/chat/completions'):
                 unload_url = unload_url[:unload_url.rfind('/v1/chat/completions')]
             response = requests.post(
@@ -477,35 +473,37 @@ def _load_qwen_http():
                 timeout=30,
             )
             if response.ok:
-                logger.info("✅ Qwen-2.5 unloaded via API (unload_model), result=%s", response.text)
+                logger.info("✅ Llama-3.2 unloaded via API (unload_model), result=%s", response.text)
             else:
-                logger.warning("Qwen-2.5 unload_model failed: %s", response.text)
+                logger.warning("Llama-3.2 unload_model failed: %s", response.text)
         except Exception as e:
-            logger.warning("Qwen-2.5 unload_model request failed: %s", e)
+            logger.warning("Llama-3.2 unload_model request failed: %s", e)
 
-    logger.info("Qwen-2.5 via HTTP (%s).", QWEN_API_URL)
+    logger.info("Llama-3.2 via HTTP (%s).", LLAMA_API_URL)
     return {'run': _run, 'unload': _unload}
 
-def get_qwen():
-    global _qwen_fn
-    with _qwen_lock:
-        if _qwen_fn is None:
-            _qwen_fn = (_load_qwen_rkllm() if QWEN_BACKEND == "rkllm" else None) or _load_qwen_http()
-        return _qwen_fn
+def get_llama():
+    global _llama_fn
+    with _llama_lock:
+        if _llama_fn is None:
+            _llama_fn = (_load_llama_rkllm() if LLAMA_BACKEND == "rkllm" else None) or _load_llama_http()
+        return _llama_fn
 
 
-def _parse_qwen_text_response(raw: str, transcript: str) -> dict:
-    """Parse non-JSON Qwen output for translation/reply/store fields."""
+def _parse_llm_text_response(raw: str, transcript: str) -> dict:
+    """Parse non-JSON Llama3.2 output for translation/reply/store/fetch fields."""
     text = (raw or "").strip()
     reply_text = text
     action = None
     obj = None
     location = None
 
-    # Check for REPLY
-    mr = re.search(r"REPLY:\s*(.*?)(?:\n\nSTORE:|$)", text, flags=re.IGNORECASE | re.DOTALL)
-    if mr:
-        reply_text = mr.group(1).strip()
+    # Check for FETCH
+    mf = re.search(r"FETCH:\s*(.*)", text, flags=re.IGNORECASE)
+    if mf:
+        action = "fetch"
+        obj = mf.group(1).strip()
+        reply_text = re.sub(r"\n?FETCH:\s*.*", "", reply_text, flags=re.IGNORECASE).strip()
 
     # Check for STORE
     ms = re.search(r"STORE:\s*(.*)", text, flags=re.IGNORECASE)
@@ -521,10 +519,17 @@ def _parse_qwen_text_response(raw: str, transcript: str) -> dict:
         # Clean up reply text to remove the STORE line
         reply_text = re.sub(r"\n?STORE:\s*.*", "", reply_text, flags=re.IGNORECASE).strip()
 
+    # Check for REPLY
+    mr = re.search(r"REPLY:\s*(.*?)(?:\n\n(?:STORE|FETCH):|$)", text, flags=re.IGNORECASE | re.DOTALL)
+    if mr:
+        reply_text = mr.group(1).strip()
+
     # Fallback for fetch if the quick-check failed
     if not action and _is_memory_query(transcript):
         action = "fetch"
-        obj = transcript
+        # Attempt to strip common conversational prefixes to isolate the actual object
+        cleaned = re.sub(r"^(where is|where are|find|tell me where|what happened to|where did i put|where's)\s+", "", transcript, flags=re.IGNORECASE).strip()
+        obj = cleaned.replace("?", "").strip() or transcript
 
     return {
         "action": action,
@@ -535,41 +540,41 @@ def _parse_qwen_text_response(raw: str, transcript: str) -> dict:
     }
 
 
-def call_qwen(transcript: str, retries: int = 0) -> dict:
-    """Send transcript to Qwen-2.5.
+def call_llama(transcript: str, retries: int = 0) -> dict:
+    """Send transcript to Llama3.2.
 
     Returns a dict containing at least:
         {"action", "object", "location", "translation", "reply_text"}
     """
     _ensure_stt_released_for_llm()
     msg = _USER_TEMPLATE.format(transcript=transcript)
-    qwen = get_qwen()
+    llama = get_llama()
 
     for attempt in range(retries + 1):
         try:
             t0  = time.time()
             # unified API for rkllm/http: expects dict with run/unload
-            if isinstance(qwen, dict):
-                raw = qwen['run'](msg)
+            if isinstance(llama, dict):
+                raw = llama['run'](msg)
             else:
-                raw = qwen(msg)
+                raw = llama(msg)
             raw = "" if raw is None else str(raw).strip()
             logger.info("LLM latency: %.2fs (attempt %d)", time.time() - t0, attempt + 1)
 
             # Always parse as text response since model never returns JSON
-            result = _parse_qwen_text_response(raw, transcript)
+            result = _parse_llm_text_response(raw, transcript)
 
             # Unload model after response to free NPU for STT
-            if isinstance(qwen, dict) and 'unload' in qwen:
+            if isinstance(llama, dict) and 'unload' in llama:
                 try:
-                    qwen['unload']()
+                    llama['unload']()
                 except Exception as unload_exc:
                     logger.warning("Model unload failed: %s", unload_exc)
 
             return result
 
         except Exception as e:
-            logger.error("Qwen request error (attempt %d): %s", attempt + 1, e)
+            logger.error("Llama-3.2 request error (attempt %d): %s", attempt + 1, e)
             if attempt == retries:
                 break
             time.sleep(1)
@@ -596,6 +601,7 @@ _STOPWORDS = {
     "the", "a", "an", "on", "in", "at", "to", "for", "of", "and", "or", "is", "are", "was",
     "were", "it", "my", "your", "you", "i", "me", "that", "this", "these", "those", "have",
     "has", "had", "will", "would", "could", "should", "them", "then", "there", "here", "from",
+    "where", "what", "how", "who", "find", "tell", "remember", "did", "put", "can", "please"
 }
 
 
@@ -624,12 +630,14 @@ def _extract_keywords(text: str) -> List[str]:
     return [w for w in dict.fromkeys(words) if w not in _STOPWORDS]
 
 
-def save_memory_note(action: str, obj: str, location: str) -> int:
+def _current_memory_timestamp() -> str:
+    return datetime.datetime.now().strftime("%d-%m-%Y %I:%M %p")
+
+def save_memory_note(action: str, obj: str, location: str, timestamp: Optional[str] = None) -> int:
     """Store memory with specific structure: action, object, location."""
     if not obj:
         return 0
-    # Format: 23-03-2026 12:23 pm
-    ts = datetime.datetime.now().strftime("%d-%m-%Y %I:%M %p")
+    ts = timestamp or _current_memory_timestamp()
     
     with _MEMORY_DB_LOCK:
         conn = _get_db_conn()
@@ -663,14 +671,14 @@ def query_memory(query: str) -> Optional[dict]:
 
 def _release_llama_and_load_whisper():
     """Unload Llama memory model and ensure Whisper STT model is loaded."""
-    global _qwen_fn
-    with _qwen_lock:
-        if _qwen_fn and isinstance(_qwen_fn, dict) and 'unload' in _qwen_fn:
+    global _llama_fn
+    with _llama_lock:
+        if _llama_fn and isinstance(_llama_fn, dict) and 'unload' in _llama_fn:
             try:
-                _qwen_fn['unload']()
+                _llama_fn['unload']()
             except Exception as e:
                 logger.warning("Failed to unload Qwen/Llama model: %s", e)
-        _qwen_fn = None
+        _llama_fn = None
 
     try:
         get_stt().load()
@@ -694,20 +702,22 @@ def translate_hindi_to_english(text: str) -> str:
         return ""
     _ensure_stt_released_for_llm()
     try:
-        qwen = get_qwen()
+        llama = get_llama()
+        # Completion-style prompt: the model just fills in after "English:"
         prompt = (
-            "Translate the following Hindi transcript to English. "
-            "Output ONLY the English translation (no explanation).\n\n"
-            f"{text.strip()}"
+            f"Translate to English. Write only the translation.\n"
+            f"Hindi: {text.strip()}\n"
+            f"English:"
         )
 
-        if isinstance(qwen, dict):
-            raw = qwen["run"](prompt)
+        if isinstance(llama, dict):
+            raw = llama["run"](prompt)
         else:
-            raw = qwen(prompt)
+            raw = llama(prompt)
 
         raw_s = "" if raw is None else str(raw).strip()
-        # we do not unload here because call_qwen handles unload after structured response
+        # Strip any accidental prefix the model may echo back
+        raw_s = re.sub(r"^(English:|Translation:)\s*", "", raw_s, flags=re.IGNORECASE).strip()
         return raw_s
     except Exception as e:
         logger.warning("Translation call failed: %s", e)
@@ -746,12 +756,12 @@ def push_event(event: dict):
 
 def process_audio(audio_path: str, duration_secs: int = 30) -> dict:
     """
-    Transcribe *audio_path* (Hindi-forced) then get Qwen-2.5 response.
+    Transcribe *audio_path* (Hindi-forced) then get Llama-3.2 response.
 
     Returns:
         {
             "transcript":    str,
-            "qwen_response": str,
+            "llama_response": str,
             "memory_note":   str | None,
         }
 
@@ -791,54 +801,31 @@ def process_audio(audio_path: str, duration_secs: int = 30) -> dict:
     # translate first (fallback to a direct translation call if JSON translation isn't available)
     translation = translate_hindi_to_english(transcript)
 
-    # If this is a direct memory retrieval query, hit local DB first for speed
-    if _is_memory_query(translation):
-        found = query_memory(translation)
-        if found:
-            # Reconstruct the sentence from the structured columns
-            obj = found.get('object', 'it')
-            loc = found.get('location', 'somewhere')
-            time_str = found.get('timestamp', 'recently')
-            
-            # Format the output for the UI
-            memory_text = f"{obj} is in {loc} (saved on {time_str})"
-            qwen_reply = f"I found this: {memory_text}"
-            qwen_reply = f"Translation: {translation}\n{qwen_reply}"
-            
-            _release_llama_and_load_whisper()
-            result = {
-                "transcript": transcript,
-                "translation": translation,
-                "qwen_response": qwen_reply,
-                "memory_note": memory_text,
-            }
-            push_event({"type": "final", **result})
-            return result
-
     # Ask the assistant for structured output
     push_event({"type": "status", "text": "Jarvis is thinking…"})
     t0 = time.time()
-    structured = call_qwen(translation)
-    logger.info("Qwen done in %.2fs", time.time() - t0)
+    structured = call_llama(translation)
+    logger.info("Llama-3.2 done in %.2fs", time.time() - t0)
 
-    # Extract data from Qwen's response
+    # Extract data from Llama-3.2's response
     action = (structured.get("action") or "").lower()
     obj = structured.get("object")
     location = structured.get("location")
-    qwen_reply = structured.get("reply_text") or ""
+    llama_reply = structured.get("reply_text") or ""
     
     display_note = None  # Prevents UnboundLocalError crash
 
     # Logic for Storing
     if action == "store" and obj:
         location_str = location or "unknown location"
-        display_note = f"{obj} in {location_str}"
+        ts = _current_memory_timestamp()
+        display_note = f"{obj} in {location_str} (saved on {ts})"
         
         # Save to DB with proper schema
-        save_memory_note(action, obj, location_str)
+        save_memory_note(action, obj, location_str, timestamp=ts)
         
         # Override reply for UI as requested
-        qwen_reply = f"STORE: {display_note}"
+        llama_reply = f"STORE: {display_note}"
 
     # Logic for LLM-driven Fetching (Fallback if _is_memory_query missed it)
     elif action == "fetch" and obj:
@@ -848,19 +835,19 @@ def process_audio(audio_path: str, duration_secs: int = 30) -> dict:
             loc_found = found.get('location', 'somewhere')
             time_str = found.get('timestamp', 'recently')
             
-            memory_text = f"{obj_found} is in {loc_found} (saved on {time_str})"
-            qwen_reply = f"I remember! {memory_text}"
+            display_note = f"{obj_found} is in {loc_found} (saved on {time_str})"
+            llama_reply = f"I remember! {display_note}"
             _release_llama_and_load_whisper()
         else:
-            qwen_reply = qwen_reply or "I don't have that in memory yet."
+            llama_reply = llama_reply or "I don't have that in memory yet."
 
-    qwen_reply = f"Translation: {translation}\n{qwen_reply}"
-
+    # translation is sent as its own field; llama_reply stays clean for the reply block
     result = {
-        "transcript": transcript,
-        "translation": translation,
-        "qwen_response": qwen_reply,
-        "memory_note": display_note,
+        "transcript":    transcript,
+        "translation":   translation,
+        "llama_response": llama_reply,
+        "qwen_response":  llama_reply,
+        "memory_note":   display_note,
     }
     push_event({"type": "final", **result})
     return result
