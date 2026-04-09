@@ -1,0 +1,17 @@
+[Unit]
+Description=RKLLM FastAPI WebSocket App
+After=network.target rkllama.service
+Requires=rkllama.service
+
+[Service]
+Type=simple
+User=smadmin
+Group=smadmin
+WorkingDirectory=/home/smadmin/rknn-model/assistant
+ExecStart=/home/smadmin/rkllm_env/bin/uvicorn web_ui:app --host 0.0.0.0 --port 8765
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

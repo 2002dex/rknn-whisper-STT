@@ -1,0 +1,21 @@
+[Unit]
+Description=RKLLAMA Server
+After=network.target
+
+[Service]
+Type=simple
+User=smadmin
+Group=smadmin
+WorkingDirectory=/home/smadmin
+ExecStart=/home/smadmin/rkllm_env/bin/rkllama_server --model /home/smadmin/rkllama/models/
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+
+# If process crashes due to NPU error, restart
+KillSignal=SIGINT
+TimeoutStopSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
