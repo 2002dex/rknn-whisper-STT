@@ -149,25 +149,20 @@ EOF
 
 ## Rkllm
 
-Clone the git repo
-
-copy the runtime :
-
-cd rknn-llm/rkllm-runtime/Linux/librkllm_api/aarch64
-cp ./librkllmrt.so /usr/lib/
-
-## setup for Rkllama
+## Setup for Rkllama
 
 ### Standard Installation (virtual environment like: conda, uv, venv)
 
+```bash
 git clone https://github.com/NotPunchnox/rkllama.git
 
 cd rkllama
 
 pip install dotenv huggingface_hub flask flask_cors
 
-Install RKLLama:
+#Install RKLLama:
 python3 -m pip install .
+```
 
 If it gives error:
 
@@ -190,13 +185,13 @@ cd ~/rkllama
 pip install -e . --no-deps
 ```
 
-Note: Using --no-deps stops pip from looking at the broken dependency list. You will just need to make sure you have numpy installed manually.
+Note: Using `--no-deps` stops pip from looking at the broken dependency list. You will just need to make sure you have numpy installed manually.
 A Crucial Note for CM3588
 The rkllama library is a wrapper for the RKLLM C API. For it to work on your CM3588:
-You must have the librkllmrt.so file in your system library path (usually /usr/lib/ or defined in LD_LIBRARY_PATH).
+You must have the `librkllmrt.so` file in your system library path (usually `/usr/lib/` or defined in `LD_LIBRARY_PATH`).
 If you haven't already, download the runtime from the official Rockchip RKNN-LLM GitHub.
 
-Additionally, you are trying to install torch==2.8.0 and transformers==4.57.6, which do not exist yet (the latest stable Torch is ~2.5.1 and Transformers is ~4.48).
+Additionally, you are trying to install `torch==2.8.0` and `transformers==4.57.6`, which do not exist yet (the latest stable Torch is ~2.5.1 and Transformers is ~4.48).
 
 #### Run Server
 Virtualization with venv is started automatically, as well as the NPU frequency setting.
@@ -254,6 +249,23 @@ wget https://github.com/dscripka/openWakeWord/releases/download/v0.5.1/embedding
 
 - Transfer the require indic-whisper-medium-hindi model in CM3588.
 
+## Local AI Assistant
+
+Create a folder `/home/smadmin/rknn-model/assistant` in Board and transfer all folder/files in Local-AI-Assistant to that folder.
+
+Make sure rkllama server is running in one SSH session or docker contianer
+
+Run the web server
+
+```bash
+cd /home/smadmin/rknn-model/assistant
+web_ui:app --host 0.0.0.0 --port 8765
+```
+
+Open the link in browser
+`http://<CM3588-IP-Address>:8765` or `http://smritimegh.local:8765/`
+
+
 ### For running AI assistant using service
 
 Transfer both service file to `/etc/systemd/system`
@@ -267,4 +279,4 @@ sudo systemctl enable rkllm-webui.service && sudo systemctl start rkllm-webui.se
 
 Model Used: https://huggingface.co/danielferr85/whisper-with-past-models-rknn/tree/main/whisper-small
 
-- Download all the model and tokenizer and Transfer it in CM3588.
+- Download all the model files, tokenizer and Transfer it in CM3588.
